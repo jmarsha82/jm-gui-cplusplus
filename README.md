@@ -1,11 +1,12 @@
 # JM GUI C++ Apps
 
-This repo contains small native Windows C++ desktop applications built with CMake and the Windows API.
+This repo contains small native Windows C++ desktop applications built with CMake and Raylib.
 
 ## Apps
 
-- `TaskListApp`: enter tasks, add them to a visible list, and sort that list alphabetically by clicking the `Name` header.
-- `CGPACalculator`: enter a student's courses, credits, and grades to calculate total credits, total grade points, semester GPA, CGPA, and the student's overall course grade.
+- `TaskListApp`: enter tasks, add them to a polished Raylib list view, then sort that list alphabetically.
+- `CGPACalculator`: enter a student's courses, credits, and grades in a Raylib dashboard to calculate total credits, total grade points, semester GPA, CGPA, and the student's overall course grade.
+- `SnakeGame`: play a Raylib snake game with a neon orchard color theme, keyboard controls, score tracking, pause, and restart.
 
 ## Build
 
@@ -16,11 +17,21 @@ cmake -S . -B build
 cmake --build build --config Release
 ```
 
+Raylib is downloaded into the build tree during CMake configuration. To build a single target:
+
+```powershell
+cmake -S . -B build
+cmake --build build --config Release --target TaskListApp
+cmake --build build --config Release --target CGPACalculator
+cmake --build build --config Release --target SnakeGame
+```
+
 The executables will be created under:
 
 ```text
 build\Release\TaskListApp.exe
 build\Release\CGPACalculator.exe
+build\Release\SnakeGame.exe
 ```
 
 ## Run An App
@@ -30,15 +41,33 @@ Run the app you want by launching its executable:
 ```powershell
 .\build\Release\TaskListApp.exe
 .\build\Release\CGPACalculator.exe
+.\build\Release\SnakeGame.exe
+```
+
+You can also build and run a single app target:
+
+```powershell
+cmake --build build --config Release --target TaskListApp
+.\build\Release\TaskListApp.exe
+
+cmake --build build --config Release --target CGPACalculator
+.\build\Release\CGPACalculator.exe
+
+cmake --build build --config Release --target SnakeGame
+.\build\Release\SnakeGame.exe
 ```
 
 ## Task List App
 
-Type a task in the input field, then click `Add` or press `Enter`. Each task is added as a new row in the `Name` list. Click the `Name` header to sort tasks alphabetically.
+Type a task in the input field, then click `Add` or press `Enter`. Each task is added as a new row in the list. Click `Sort A-Z` / `Sort Z-A` to toggle alphabetical order.
 
 ## CGPA Calculator
 
 Enter the student's name, then add each course with its credit count and earned grade. The course table shows each individual course grade and grade points. The summary panel updates the number of courses, total credits, total grade points, semester GPA, CGPA, and overall course grade.
+
+## Snake Game
+
+Use the arrow keys or `WASD` to steer the snake toward the citrus food. Press `Space` to pause and `R` to restart after a collision. The game uses a neon orchard theme with ink backgrounds, mint snake segments, citrus food, and coral game-over accents.
 
 ## Tests
 

@@ -1,308 +1,201 @@
-#ifndef UNICODE
-#define UNICODE
-#endif
-
-#ifndef _UNICODE
-#define _UNICODE
-#endif
-
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-
-#include <windows.h>
-#include <commctrl.h>
+#include <raylib.h>
 
 #include <algorithm>
-#include <cwctype>
+#include <cctype>
 #include <string>
 #include <vector>
 
-#pragma comment(lib, "comctl32.lib")
-
 namespace
 {
-constexpr int InputId = 1001;
-constexpr int AddButtonId = 1002;
-constexpr int TaskListId = 1003;
+constexpr int WindowWidth = 860;
+constexpr int WindowHeight = 620;
+constexpr int MaxTaskLength = 72;
 
-HWND g_input = nullptr;
-HWND g_addButton = nullptr;
-HWND g_taskList = nullptr;
-WNDPROC g_originalInputProc = nullptr;
+constexpr Color Ink{16, 22, 35, 255};
+constexpr Color Panel{24, 32, 48, 255};
+constexpr Color PanelSoft{31, 41, 59, 255};
+constexpr Color Mint{77, 221, 166, 255};
+constexpr Color Citrus{255, 203, 92, 255};
+constexpr Color Coral{255, 111, 105, 255};
+constexpr Color Text{236, 244, 241, 255};
+constexpr Color Muted{157, 176, 185, 255};
+constexpr Color Stroke{255, 255, 255, 34};
+constexpr Color Field{11, 16, 27, 255};
 
-std::vector<std::wstring> g_tasks;
-bool g_sortAscending = true;
-
-std::wstring trim(const std::wstring& text)
+struct TextBox
 {
-    auto first = std::find_if_not(text.begin(), text.end(), [](wchar_t ch) {
-        return std::iswspace(ch) != 0;
-    });
+    Rectangle bounds{};
+    std::string text;
+    bool focused = false;
+};
 
-    auto last = std::find_if_not(text.rbegin(), text.rend(), [](wchar_t ch) {
-        return std::iswspace(ch) != 0;
+std::string trim(const std::string& value)
+{
+    const auto first = std::find_if_not(value.begin(), value.end(), [](unsigned char ch) {
+        return std::isspace(ch) != 0;
+    });
+    const auto last = std::find_if_not(value.rbegin(), value.rend(), [](unsigned char ch) {
+        return std::isspace(ch) != 0;
     }).base();
 
     if (first >= last)
     {
-        return L"";
+        return {};
     }
 
-    return std::wstring(first, last);
+    return std::string(first, last);
 }
 
-std::wstring getWindowText(HWND window)
+bool button(Rectangle bounds, const char* label, Color fill, Color hoverFill)
 {
-    const int length = GetWindowTextLengthW(window);
-    std::wstring text(static_cast<size_t>(length) + 1, L'\0');
-    GetWindowTextW(window, text.data(), length + 1);
-    text.resize(static_cast<size_t>(length));
-    return text;
+    const bool hovered = CheckCollisionPointRec(GetMousePosition(), bounds);
+    const bool pressed = hovered && IsMouseButtonPressed(MOUSE_LEFT_BUTTON);
+
+    DrawRectangleRounded(bounds, 0.22f, 12, hovered ? hoverFill : fill);
+    DrawRectangleRoundedLinesEx(bounds, 0.22f, 12, 1.0f, Stroke);
+
+    const int fontSize = 18;
+    const int labelWidth = MeasureText(label, fontSize);
+    DrawText(
+        label,
+        static_cast<int>(bounds.x + ((bounds.width - labelWidth) / 2.0f)),
+        static_cast<int>(bounds.y + ((bounds.height - fontSize) / 2.0f)),
+        fontSize,
+        Text);
+
+    return pressed;
 }
 
-void refreshTaskList()
+void drawTextBox(TextBox& box, const char* placeholder)
 {
-    ListView_DeleteAllItems(g_taskList);
-
-    for (size_t index = 0; index < g_tasks.size(); ++index)
+    if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
     {
-        LVITEMW item{};
-        item.mask = LVIF_TEXT;
-        item.iItem = static_cast<int>(index);
-        item.iSubItem = 0;
-        item.pszText = const_cast<LPWSTR>(g_tasks[index].c_str());
-        ListView_InsertItem(g_taskList, &item);
+        box.focused = CheckCollisionPointRec(GetMousePosition(), box.bounds);
+    }
+
+    DrawRectangleRounded(box.bounds, 0.16f, 12, Field);
+    DrawRectangleRoundedLinesEx(box.bounds, 0.16f, 12, box.focused ? 2.0f : 1.0f, box.focused ? Mint : Stroke);
+
+    const char* shown = box.text.empty() ? placeholder : box.text.c_str();
+    DrawText(shown, static_cast<int>(box.bounds.x + 16), static_cast<int>(box.bounds.y + 15), 20, box.text.empty() ? Muted : Text);
+
+    if (box.focused && (GetTime() - static_cast<int>(GetTime())) < 0.55)
+    {
+        const int caretX = static_cast<int>(box.bounds.x + 17 + MeasureText(box.text.c_str(), 20));
+        DrawLine(caretX, static_cast<int>(box.bounds.y + 14), caretX, static_cast<int>(box.bounds.y + 39), Mint);
     }
 }
 
-void addTaskFromInput()
+void updateTextBox(TextBox& box, int maxLength)
 {
-    const std::wstring task = trim(getWindowText(g_input));
-    if (task.empty())
+    if (!box.focused)
     {
-        SetFocus(g_input);
         return;
     }
 
-    g_tasks.push_back(task);
-    refreshTaskList();
-
-    SetWindowTextW(g_input, L"");
-    SetFocus(g_input);
-}
-
-void sortTasksByName()
-{
-    std::sort(g_tasks.begin(), g_tasks.end(), [](const std::wstring& left, const std::wstring& right) {
-        const int comparison = CompareStringOrdinal(
-            left.c_str(),
-            -1,
-            right.c_str(),
-            -1,
-            TRUE);
-
-        return comparison == CSTR_LESS_THAN;
-    });
-
-    if (!g_sortAscending)
+    for (int key = GetCharPressed(); key > 0; key = GetCharPressed())
     {
-        std::reverse(g_tasks.begin(), g_tasks.end());
-    }
-
-    g_sortAscending = !g_sortAscending;
-    refreshTaskList();
-}
-
-void layoutControls(HWND window)
-{
-    RECT client{};
-    GetClientRect(window, &client);
-
-    constexpr int margin = 16;
-    constexpr int buttonWidth = 96;
-    constexpr int controlHeight = 32;
-    constexpr int gap = 8;
-
-    const int width = client.right - client.left;
-    const int height = client.bottom - client.top;
-    const int contentWidth = std::max(120, width - (margin * 2));
-    const int contentHeight = std::max(80, height - margin);
-    const int inputWidth = std::max(80, contentWidth - buttonWidth - gap);
-    const int listTop = margin + controlHeight + 14;
-
-    MoveWindow(g_input, margin, margin, inputWidth, controlHeight, TRUE);
-    MoveWindow(g_addButton, margin + inputWidth + gap, margin, buttonWidth, controlHeight, TRUE);
-    MoveWindow(g_taskList, margin, listTop, contentWidth, std::max(40, contentHeight - listTop), TRUE);
-
-    ListView_SetColumnWidth(g_taskList, 0, contentWidth - 4);
-}
-
-LRESULT CALLBACK inputProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
-{
-    if (message == WM_KEYDOWN && wParam == VK_RETURN)
-    {
-        addTaskFromInput();
-        return 0;
-    }
-
-    return CallWindowProcW(g_originalInputProc, window, message, wParam, lParam);
-}
-
-void createControls(HWND window)
-{
-    g_input = CreateWindowExW(
-        WS_EX_CLIENTEDGE,
-        L"EDIT",
-        L"",
-        WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
-        0,
-        0,
-        0,
-        0,
-        window,
-        reinterpret_cast<HMENU>(static_cast<INT_PTR>(InputId)),
-        GetModuleHandleW(nullptr),
-        nullptr);
-
-    g_addButton = CreateWindowExW(
-        0,
-        L"BUTTON",
-        L"Add",
-        WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-        0,
-        0,
-        0,
-        0,
-        window,
-        reinterpret_cast<HMENU>(static_cast<INT_PTR>(AddButtonId)),
-        GetModuleHandleW(nullptr),
-        nullptr);
-
-    g_taskList = CreateWindowExW(
-        WS_EX_CLIENTEDGE,
-        WC_LISTVIEWW,
-        L"",
-        WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS,
-        0,
-        0,
-        0,
-        0,
-        window,
-        reinterpret_cast<HMENU>(static_cast<INT_PTR>(TaskListId)),
-        GetModuleHandleW(nullptr),
-        nullptr);
-
-    ListView_SetExtendedListViewStyle(g_taskList, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
-
-    LVCOLUMNW column{};
-    column.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM;
-    column.pszText = const_cast<LPWSTR>(L"Name");
-    column.cx = 400;
-    column.iSubItem = 0;
-    ListView_InsertColumn(g_taskList, 0, &column);
-
-    g_originalInputProc = reinterpret_cast<WNDPROC>(
-        SetWindowLongPtrW(g_input, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(inputProc)));
-
-    HFONT guiFont = reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
-    SendMessageW(g_input, WM_SETFONT, reinterpret_cast<WPARAM>(guiFont), TRUE);
-    SendMessageW(g_addButton, WM_SETFONT, reinterpret_cast<WPARAM>(guiFont), TRUE);
-    SendMessageW(g_taskList, WM_SETFONT, reinterpret_cast<WPARAM>(guiFont), TRUE);
-}
-
-LRESULT CALLBACK windowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
-{
-    switch (message)
-    {
-    case WM_CREATE:
-        createControls(window);
-        layoutControls(window);
-        return 0;
-
-    case WM_SIZE:
-        layoutControls(window);
-        return 0;
-
-    case WM_COMMAND:
-        if (LOWORD(wParam) == AddButtonId && HIWORD(wParam) == BN_CLICKED)
+        if (key >= 32 && key <= 126 && static_cast<int>(box.text.size()) < maxLength)
         {
-            addTaskFromInput();
-            return 0;
+            box.text.push_back(static_cast<char>(key));
         }
-        break;
+    }
 
-    case WM_NOTIFY:
+    if (IsKeyPressed(KEY_BACKSPACE) && !box.text.empty())
     {
-        const auto* notification = reinterpret_cast<LPNMHDR>(lParam);
-        if (notification->idFrom == TaskListId && notification->code == LVN_COLUMNCLICK)
-        {
-            sortTasksByName();
-            return 0;
-        }
-        break;
+        box.text.pop_back();
     }
-
-    case WM_DESTROY:
-        PostQuitMessage(0);
-        return 0;
-    }
-
-    return DefWindowProcW(window, message, wParam, lParam);
-}
 }
 
-int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int commandShow)
+void drawHeader()
 {
-    INITCOMMONCONTROLSEX commonControls{};
-    commonControls.dwSize = sizeof(commonControls);
-    commonControls.dwICC = ICC_LISTVIEW_CLASSES;
-    InitCommonControlsEx(&commonControls);
+    DrawText("Task List", 40, 34, 42, Text);
+    DrawText("Capture the work, sort it cleanly, keep the day moving.", 42, 86, 18, Muted);
+}
 
-    const wchar_t className[] = L"TaskListAppWindow";
+void drawTaskRows(const std::vector<std::string>& tasks)
+{
+    const Rectangle list{40, 186, 780, 372};
+    DrawRectangleRounded(list, 0.04f, 10, Panel);
+    DrawRectangleRoundedLinesEx(list, 0.04f, 10, 1.0f, Stroke);
 
-    WNDCLASSW windowClass{};
-    windowClass.lpfnWndProc = windowProc;
-    windowClass.hInstance = instance;
-    windowClass.lpszClassName = className;
-    windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    windowClass.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+    DrawRectangleRounded({56, 204, 748, 44}, 0.08f, 8, PanelSoft);
+    DrawText("Name", 76, 217, 18, Mint);
+    DrawText("Click Sort to toggle alphabetical order", 495, 217, 16, Muted);
 
-    if (!RegisterClassW(&windowClass))
+    if (tasks.empty())
     {
-        MessageBoxW(nullptr, L"Could not register the application window.", L"Task List App", MB_ICONERROR);
-        return 1;
+        DrawText("No tasks yet", 76, 312, 30, Text);
+        DrawText("Type a task above and press Enter or Add.", 78, 352, 18, Muted);
+        return;
     }
 
-    HWND window = CreateWindowExW(
-        0,
-        className,
-        L"Task List App",
-        WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT,
-        CW_USEDEFAULT,
-        640,
-        480,
-        nullptr,
-        nullptr,
-        instance,
-        nullptr);
-
-    if (!window)
+    for (int index = 0; index < static_cast<int>(tasks.size()) && index < 8; ++index)
     {
-        MessageBoxW(nullptr, L"Could not create the application window.", L"Task List App", MB_ICONERROR);
-        return 1;
+        const int y = 266 + (index * 38);
+        const Color row = index % 2 == 0 ? Color{255, 255, 255, 8} : Color{255, 255, 255, 14};
+        DrawRectangleRounded({56, static_cast<float>(y), 748, 31}, 0.08f, 8, row);
+        DrawText(TextFormat("%02d", index + 1), 74, y + 7, 16, Citrus);
+        DrawText(tasks[index].c_str(), 116, y + 6, 18, Text);
     }
 
-    ShowWindow(window, commandShow);
-    UpdateWindow(window);
-
-    MSG message{};
-    while (GetMessageW(&message, nullptr, 0, 0) > 0)
+    if (tasks.size() > 8)
     {
-        TranslateMessage(&message);
-        DispatchMessageW(&message);
+        DrawText(TextFormat("+%d more", static_cast<int>(tasks.size() - 8)), 76, 532, 16, Muted);
+    }
+}
+}
+
+int main()
+{
+    SetConfigFlags(FLAG_WINDOW_HIGHDPI);
+    InitWindow(WindowWidth, WindowHeight, "Task List App");
+    SetTargetFPS(60);
+
+    TextBox input{{40, 120, 560, 56}, {}, true};
+    std::vector<std::string> tasks;
+    bool sortAscending = true;
+
+    while (!WindowShouldClose())
+    {
+        updateTextBox(input, MaxTaskLength);
+
+        BeginDrawing();
+        ClearBackground(Ink);
+        DrawRectangleGradientV(0, 0, WindowWidth, WindowHeight, Ink, {18, 47, 48, 255});
+        drawHeader();
+        drawTextBox(input, "Add a task...");
+
+        const bool addPressed = button({616, 120, 92, 56}, "Add", Mint, {93, 238, 184, 255});
+        const bool sortPressed = button({720, 120, 100, 56}, sortAscending ? "Sort A-Z" : "Sort Z-A", PanelSoft, {42, 55, 79, 255});
+
+        if ((addPressed || (input.focused && IsKeyPressed(KEY_ENTER))) && !trim(input.text).empty())
+        {
+            tasks.push_back(trim(input.text));
+            input.text.clear();
+            input.focused = true;
+        }
+
+        if (sortPressed)
+        {
+            std::sort(tasks.begin(), tasks.end(), [](const std::string& left, const std::string& right) {
+                return std::lexicographical_compare(left.begin(), left.end(), right.begin(), right.end(), [](char a, char b) {
+                    return std::tolower(static_cast<unsigned char>(a)) < std::tolower(static_cast<unsigned char>(b));
+                });
+            });
+
+            if (!sortAscending)
+            {
+                std::reverse(tasks.begin(), tasks.end());
+            }
+            sortAscending = !sortAscending;
+        }
+
+        drawTaskRows(tasks);
+        DrawText(TextFormat("%d tasks", static_cast<int>(tasks.size())), 42, 576, 18, Muted);
+        EndDrawing();
     }
 
-    return static_cast<int>(message.wParam);
+    CloseWindow();
+    return 0;
 }

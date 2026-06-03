@@ -1,419 +1,317 @@
-#ifndef UNICODE
-#define UNICODE
-#endif
-
-#ifndef _UNICODE
-#define _UNICODE
-#endif
-
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-
-#include <windows.h>
-#include <commctrl.h>
+#include <raylib.h>
 
 #include "cgpa/cgpa_core.hpp"
 
 #include <algorithm>
-#include <cwctype>
+#include <cctype>
 #include <iomanip>
 #include <sstream>
 #include <string>
 #include <vector>
 
-#pragma comment(lib, "comctl32.lib")
-
 namespace
 {
-constexpr int StudentInputId = 2001;
-constexpr int CourseInputId = 2002;
-constexpr int CreditsInputId = 2003;
-constexpr int GradeComboId = 2004;
-constexpr int AddCourseButtonId = 2005;
-constexpr int ClearButtonId = 2006;
-constexpr int CourseListId = 2007;
-constexpr int SummaryTextId = 2008;
+constexpr int WindowWidth = 1120;
+constexpr int WindowHeight = 720;
 
-HWND g_studentInput = nullptr;
-HWND g_courseInput = nullptr;
-HWND g_creditsInput = nullptr;
-HWND g_gradeCombo = nullptr;
-HWND g_addButton = nullptr;
-HWND g_clearButton = nullptr;
-HWND g_courseList = nullptr;
-HWND g_summaryText = nullptr;
-WNDPROC g_originalCourseInputProc = nullptr;
+constexpr Color Ink{15, 21, 34, 255};
+constexpr Color Panel{24, 32, 48, 255};
+constexpr Color PanelSoft{31, 41, 59, 255};
+constexpr Color Mint{77, 221, 166, 255};
+constexpr Color Citrus{255, 203, 92, 255};
+constexpr Color Coral{255, 111, 105, 255};
+constexpr Color Text{236, 244, 241, 255};
+constexpr Color Muted{157, 176, 185, 255};
+constexpr Color Stroke{255, 255, 255, 34};
+constexpr Color Field{11, 16, 27, 255};
 
-std::vector<cgpa::CourseResult> g_courses;
+const std::vector<std::string> Grades{"A", "A-", "B+", "B", "B-", "C+", "C", "C-", "D+", "D", "F"};
 
-std::wstring trim(const std::wstring& text)
+struct TextBox
 {
-    auto first = std::find_if_not(text.begin(), text.end(), [](wchar_t ch) {
-        return std::iswspace(ch) != 0;
-    });
+    Rectangle bounds{};
+    std::string text;
+    bool focused = false;
+    bool numeric = false;
+};
 
-    auto last = std::find_if_not(text.rbegin(), text.rend(), [](wchar_t ch) {
-        return std::iswspace(ch) != 0;
+std::string trim(const std::string& value)
+{
+    const auto first = std::find_if_not(value.begin(), value.end(), [](unsigned char ch) {
+        return std::isspace(ch) != 0;
+    });
+    const auto last = std::find_if_not(value.rbegin(), value.rend(), [](unsigned char ch) {
+        return std::isspace(ch) != 0;
     }).base();
 
     if (first >= last)
     {
-        return L"";
+        return {};
     }
 
-    return std::wstring(first, last);
+    return std::string(first, last);
 }
 
-std::wstring getWindowText(HWND window)
+std::wstring widen(const std::string& value)
 {
-    const int length = GetWindowTextLengthW(window);
-    std::wstring text(static_cast<size_t>(length) + 1, L'\0');
-    GetWindowTextW(window, text.data(), length + 1);
-    text.resize(static_cast<size_t>(length));
-    return text;
+    return std::wstring(value.begin(), value.end());
 }
 
-std::wstring formatDouble(double value)
+std::string narrow(const std::wstring& value)
 {
-    std::wostringstream stream;
+    std::string converted;
+    converted.reserve(value.size());
+    for (wchar_t ch : value)
+    {
+        converted.push_back(static_cast<char>(ch));
+    }
+    return converted;
+}
+
+std::string formatDouble(double value)
+{
+    std::ostringstream stream;
     stream << std::fixed << std::setprecision(2) << value;
     return stream.str();
 }
 
-void setFonts()
+bool button(Rectangle bounds, const char* label, Color fill, Color hoverFill)
 {
-    HFONT guiFont = reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
-    HWND controls[] = {
-        g_studentInput,
-        g_courseInput,
-        g_creditsInput,
-        g_gradeCombo,
-        g_addButton,
-        g_clearButton,
-        g_courseList,
-        g_summaryText,
+    const bool hovered = CheckCollisionPointRec(GetMousePosition(), bounds);
+    const bool pressed = hovered && IsMouseButtonPressed(MOUSE_LEFT_BUTTON);
+
+    DrawRectangleRounded(bounds, 0.18f, 12, hovered ? hoverFill : fill);
+    DrawRectangleRoundedLinesEx(bounds, 0.18f, 12, 1.0f, Stroke);
+
+    const int fontSize = 18;
+    DrawText(
+        label,
+        static_cast<int>(bounds.x + ((bounds.width - MeasureText(label, fontSize)) / 2.0f)),
+        static_cast<int>(bounds.y + ((bounds.height - fontSize) / 2.0f)),
+        fontSize,
+        Text);
+
+    return pressed;
+}
+
+void drawTextBox(TextBox& box, const char* label, const char* placeholder)
+{
+    DrawText(label, static_cast<int>(box.bounds.x), static_cast<int>(box.bounds.y - 24), 16, Muted);
+
+    if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
+    {
+        box.focused = CheckCollisionPointRec(GetMousePosition(), box.bounds);
+    }
+
+    DrawRectangleRounded(box.bounds, 0.14f, 12, Field);
+    DrawRectangleRoundedLinesEx(box.bounds, 0.14f, 12, box.focused ? 2.0f : 1.0f, box.focused ? Mint : Stroke);
+
+    const char* shown = box.text.empty() ? placeholder : box.text.c_str();
+    DrawText(shown, static_cast<int>(box.bounds.x + 14), static_cast<int>(box.bounds.y + 14), 19, box.text.empty() ? Muted : Text);
+
+    if (box.focused && (GetTime() - static_cast<int>(GetTime())) < 0.55)
+    {
+        const int caretX = static_cast<int>(box.bounds.x + 15 + MeasureText(box.text.c_str(), 19));
+        DrawLine(caretX, static_cast<int>(box.bounds.y + 13), caretX, static_cast<int>(box.bounds.y + 38), Mint);
+    }
+}
+
+void updateTextBox(TextBox& box, int maxLength)
+{
+    if (!box.focused)
+    {
+        return;
+    }
+
+    for (int key = GetCharPressed(); key > 0; key = GetCharPressed())
+    {
+        const bool allowed = box.numeric ? (key >= '0' && key <= '9') : (key >= 32 && key <= 126);
+        if (allowed && static_cast<int>(box.text.size()) < maxLength)
+        {
+            box.text.push_back(static_cast<char>(key));
+        }
+    }
+
+    if (IsKeyPressed(KEY_BACKSPACE) && !box.text.empty())
+    {
+        box.text.pop_back();
+    }
+}
+
+int parseCredits(const std::string& value)
+{
+    const std::string cleaned = trim(value);
+    if (cleaned.empty())
+    {
+        return 0;
+    }
+
+    const int credits = std::stoi(cleaned);
+    return credits > 0 && credits <= 30 ? credits : 0;
+}
+
+void drawGradeSelector(int& selectedGrade)
+{
+    DrawText("Grade", 520, 148, 16, Muted);
+    for (int index = 0; index < static_cast<int>(Grades.size()); ++index)
+    {
+        const Rectangle chip{520.0f + (index % 6) * 55.0f, 174.0f + (index / 6) * 42.0f, 46.0f, 32.0f};
+        const bool active = index == selectedGrade;
+        const bool hovered = CheckCollisionPointRec(GetMousePosition(), chip);
+        if (hovered && IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
+        {
+            selectedGrade = index;
+        }
+
+        DrawRectangleRounded(chip, 0.24f, 10, active ? Mint : hovered ? PanelSoft : Field);
+        DrawRectangleRoundedLinesEx(chip, 0.24f, 10, 1.0f, active ? Mint : Stroke);
+        DrawText(Grades[index].c_str(), static_cast<int>(chip.x + 11), static_cast<int>(chip.y + 8), 16, active ? Ink : Text);
+    }
+}
+
+void drawSummary(const cgpa::Summary& summary, const std::string& student)
+{
+    const Rectangle card{820, 118, 260, 516};
+    DrawRectangleRounded(card, 0.06f, 12, Panel);
+    DrawRectangleRoundedLinesEx(card, 0.06f, 12, 1.0f, Stroke);
+
+    DrawText(student.empty() ? "Student" : student.c_str(), 844, 146, 24, Text);
+    DrawText("Academic snapshot", 846, 178, 16, Muted);
+
+    const char* labels[] = {"Courses", "Credits", "Grade points", "Semester GPA", "CGPA", "Overall grade"};
+    const std::string values[] = {
+        std::to_string(summary.courseCount),
+        std::to_string(summary.totalCredits),
+        formatDouble(summary.totalGradePoints),
+        formatDouble(summary.gpa),
+        formatDouble(summary.gpa),
+        narrow(summary.overallGrade),
     };
 
-    for (HWND control : controls)
+    for (int index = 0; index < 6; ++index)
     {
-        SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(guiFont), TRUE);
+        const int y = 226 + (index * 58);
+        DrawText(labels[index], 846, y, 15, Muted);
+        DrawText(values[index].c_str(), 846, y + 20, index == 5 ? 30 : 24, index == 5 ? Citrus : Text);
     }
 }
 
-void addStaticLabel(HWND window, const wchar_t* text, int x, int y, int width, int height)
+void drawCourseTable(const std::vector<cgpa::CourseResult>& courses)
 {
-    HWND label = CreateWindowExW(
-        0,
-        L"STATIC",
-        text,
-        WS_CHILD | WS_VISIBLE,
-        x,
-        y,
-        width,
-        height,
-        window,
-        nullptr,
-        GetModuleHandleW(nullptr),
-        nullptr);
+    const Rectangle table{40, 320, 760, 314};
+    DrawRectangleRounded(table, 0.04f, 10, Panel);
+    DrawRectangleRoundedLinesEx(table, 0.04f, 10, 1.0f, Stroke);
+    DrawRectangleRounded({56, 338, 728, 42}, 0.08f, 8, PanelSoft);
 
-    SendMessageW(label, WM_SETFONT, reinterpret_cast<WPARAM>(GetStockObject(DEFAULT_GUI_FONT)), TRUE);
-}
+    DrawText("Course", 76, 351, 16, Mint);
+    DrawText("Credits", 426, 351, 16, Mint);
+    DrawText("Grade", 526, 351, 16, Mint);
+    DrawText("Points", 626, 351, 16, Mint);
 
-void updateSummary()
-{
-    const cgpa::Summary summary = cgpa::summarize(g_courses);
-    const std::wstring student = trim(getWindowText(g_studentInput));
-    const std::wstring displayName = student.empty() ? L"Student" : student;
-
-    std::wostringstream text;
-    text << displayName << L"\r\n"
-         << L"Courses: " << summary.courseCount << L"\r\n"
-         << L"Total credits: " << summary.totalCredits << L"\r\n"
-         << L"Total grade points: " << formatDouble(summary.totalGradePoints) << L"\r\n"
-         << L"Semester GPA: " << formatDouble(summary.gpa) << L"\r\n"
-         << L"CGPA: " << formatDouble(summary.gpa) << L"\r\n"
-         << L"Overall course grade: " << summary.overallGrade;
-
-    SetWindowTextW(g_summaryText, text.str().c_str());
-}
-
-void refreshCourseList()
-{
-    ListView_DeleteAllItems(g_courseList);
-
-    for (size_t index = 0; index < g_courses.size(); ++index)
+    if (courses.empty())
     {
-        const cgpa::CourseResult& course = g_courses[index];
-        const std::wstring credits = std::to_wstring(course.credits);
-        const std::wstring gradePoints = formatDouble(course.gradePoint * static_cast<double>(course.credits));
-
-        LVITEMW item{};
-        item.mask = LVIF_TEXT;
-        item.iItem = static_cast<int>(index);
-        item.iSubItem = 0;
-        item.pszText = const_cast<LPWSTR>(course.name.c_str());
-        ListView_InsertItem(g_courseList, &item);
-
-        ListView_SetItemText(g_courseList, static_cast<int>(index), 1, const_cast<LPWSTR>(credits.c_str()));
-        ListView_SetItemText(g_courseList, static_cast<int>(index), 2, const_cast<LPWSTR>(course.grade.c_str()));
-        ListView_SetItemText(g_courseList, static_cast<int>(index), 3, const_cast<LPWSTR>(gradePoints.c_str()));
-    }
-
-    updateSummary();
-}
-
-bool tryReadCredits(int& credits)
-{
-    const std::wstring text = trim(getWindowText(g_creditsInput));
-    if (text.empty())
-    {
-        return false;
-    }
-
-    wchar_t* end = nullptr;
-    const long value = wcstol(text.c_str(), &end, 10);
-    if (*end != L'\0' || value <= 0 || value > 30)
-    {
-        return false;
-    }
-
-    credits = static_cast<int>(value);
-    return true;
-}
-
-std::wstring selectedGrade()
-{
-    wchar_t grade[8]{};
-    GetWindowTextW(g_gradeCombo, grade, static_cast<int>(std::size(grade)));
-    return grade;
-}
-
-void addCourseFromInput()
-{
-    const std::wstring courseName = trim(getWindowText(g_courseInput));
-    int credits = 0;
-
-    if (courseName.empty())
-    {
-        MessageBoxW(nullptr, L"Enter a course name.", L"CGPA Calculator", MB_ICONINFORMATION);
-        SetFocus(g_courseInput);
+        DrawText("No courses yet", 76, 450, 30, Text);
+        DrawText("Add a course above to start calculating.", 78, 490, 18, Muted);
         return;
     }
 
-    if (!tryReadCredits(credits))
+    for (int index = 0; index < static_cast<int>(courses.size()) && index < 6; ++index)
     {
-        MessageBoxW(nullptr, L"Enter credits as a whole number from 1 to 30.", L"CGPA Calculator", MB_ICONINFORMATION);
-        SetFocus(g_creditsInput);
-        return;
+        const auto& course = courses[index];
+        const int y = 398 + (index * 39);
+        const Color row = index % 2 == 0 ? Color{255, 255, 255, 8} : Color{255, 255, 255, 14};
+        DrawRectangleRounded({56, static_cast<float>(y), 728, 32}, 0.08f, 8, row);
+        DrawText(narrow(course.name).c_str(), 76, y + 8, 16, Text);
+        DrawText(std::to_string(course.credits).c_str(), 438, y + 8, 16, Text);
+        DrawText(narrow(course.grade).c_str(), 536, y + 8, 16, Citrus);
+        DrawText(formatDouble(course.gradePoint * course.credits).c_str(), 626, y + 8, 16, Text);
     }
 
-    const std::wstring grade = selectedGrade();
-    g_courses.push_back({courseName, credits, grade, cgpa::gradePointFor(grade)});
-
-    SetWindowTextW(g_courseInput, L"");
-    SetWindowTextW(g_creditsInput, L"");
-    SetFocus(g_courseInput);
-    refreshCourseList();
-}
-
-void clearCourses()
-{
-    g_courses.clear();
-    SetWindowTextW(g_courseInput, L"");
-    SetWindowTextW(g_creditsInput, L"");
-    refreshCourseList();
-    SetFocus(g_courseInput);
-}
-
-void layoutControls(HWND window)
-{
-    RECT client{};
-    GetClientRect(window, &client);
-
-    constexpr int margin = 16;
-    constexpr int labelHeight = 20;
-    constexpr int controlHeight = 28;
-    constexpr int gap = 8;
-    constexpr int buttonWidth = 96;
-    constexpr int summaryWidth = 230;
-
-    const int width = client.right - client.left;
-    const int height = client.bottom - client.top;
-    const int contentWidth = std::max(520, width - (margin * 2));
-    const int listWidth = std::max(280, contentWidth - summaryWidth - gap);
-    const int top = margin + labelHeight;
-    const int rowTwoTop = top + controlHeight + 32;
-    const int listTop = rowTwoTop + controlHeight + 16;
-    const int listHeight = std::max(120, height - listTop - margin);
-
-    MoveWindow(g_studentInput, margin, top, listWidth, controlHeight, TRUE);
-
-    const int gradeWidth = 90;
-    const int creditsWidth = 90;
-    const int actionsWidth = (buttonWidth * 2) + gap;
-    const int courseWidth = std::max(140, listWidth - creditsWidth - gradeWidth - actionsWidth - (gap * 4));
-
-    MoveWindow(g_courseInput, margin, rowTwoTop, courseWidth, controlHeight, TRUE);
-    MoveWindow(g_creditsInput, margin + courseWidth + gap, rowTwoTop, creditsWidth, controlHeight, TRUE);
-    MoveWindow(g_gradeCombo, margin + courseWidth + creditsWidth + (gap * 2), rowTwoTop, gradeWidth, 160, TRUE);
-    MoveWindow(g_addButton, margin + courseWidth + creditsWidth + gradeWidth + (gap * 3), rowTwoTop, buttonWidth, controlHeight, TRUE);
-    MoveWindow(g_clearButton, margin + courseWidth + creditsWidth + gradeWidth + buttonWidth + (gap * 4), rowTwoTop, buttonWidth, controlHeight, TRUE);
-    MoveWindow(g_courseList, margin, listTop, listWidth, listHeight, TRUE);
-    MoveWindow(g_summaryText, margin + listWidth + gap, top, summaryWidth, height - top - margin, TRUE);
-
-    ListView_SetColumnWidth(g_courseList, 0, std::max(140, listWidth - 260));
-    ListView_SetColumnWidth(g_courseList, 1, 70);
-    ListView_SetColumnWidth(g_courseList, 2, 70);
-    ListView_SetColumnWidth(g_courseList, 3, 110);
-}
-
-LRESULT CALLBACK courseInputProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
-{
-    if (message == WM_KEYDOWN && wParam == VK_RETURN)
+    if (courses.size() > 6)
     {
-        addCourseFromInput();
-        return 0;
+        DrawText(TextFormat("+%d more courses", static_cast<int>(courses.size() - 6)), 76, 604, 16, Muted);
     }
-
-    return CallWindowProcW(g_originalCourseInputProc, window, message, wParam, lParam);
+}
 }
 
-void addListColumn(int index, const wchar_t* title, int width)
+int main()
 {
-    LVCOLUMNW column{};
-    column.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM;
-    column.pszText = const_cast<LPWSTR>(title);
-    column.cx = width;
-    column.iSubItem = index;
-    ListView_InsertColumn(g_courseList, index, &column);
-}
+    SetConfigFlags(FLAG_WINDOW_HIGHDPI);
+    InitWindow(WindowWidth, WindowHeight, "CGPA Calculator");
+    SetTargetFPS(60);
 
-void createControls(HWND window)
-{
-    addStaticLabel(window, L"Student name", 16, 12, 180, 20);
-    addStaticLabel(window, L"Course", 16, 72, 180, 20);
+    TextBox student{{40, 118, 450, 52}, {}, true, false};
+    TextBox course{{40, 202, 330, 52}, {}, false, false};
+    TextBox credits{{390, 202, 90, 52}, {}, false, true};
+    std::vector<cgpa::CourseResult> courses;
+    int selectedGrade = 0;
+    std::string message;
 
-    g_studentInput = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 0, 0, 0, 0, window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(StudentInputId)), GetModuleHandleW(nullptr), nullptr);
-    g_courseInput = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 0, 0, 0, 0, window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(CourseInputId)), GetModuleHandleW(nullptr), nullptr);
-    g_creditsInput = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_NUMBER | ES_AUTOHSCROLL, 0, 0, 0, 0, window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(CreditsInputId)), GetModuleHandleW(nullptr), nullptr);
-    g_gradeCombo = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(GradeComboId)), GetModuleHandleW(nullptr), nullptr);
-    g_addButton = CreateWindowExW(0, L"BUTTON", L"Add Course", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 0, 0, 0, 0, window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(AddCourseButtonId)), GetModuleHandleW(nullptr), nullptr);
-    g_clearButton = CreateWindowExW(0, L"BUTTON", L"Clear", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 0, 0, 0, 0, window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(ClearButtonId)), GetModuleHandleW(nullptr), nullptr);
-    g_courseList = CreateWindowExW(WS_EX_CLIENTEDGE, WC_LISTVIEWW, L"", WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS, 0, 0, 0, 0, window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(CourseListId)), GetModuleHandleW(nullptr), nullptr);
-    g_summaryText = CreateWindowExW(WS_EX_CLIENTEDGE, L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_LEFT, 0, 0, 0, 0, window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(SummaryTextId)), GetModuleHandleW(nullptr), nullptr);
-
-    const wchar_t* grades[] = {L"A", L"A-", L"B+", L"B", L"B-", L"C+", L"C", L"C-", L"D+", L"D", L"F"};
-    for (const wchar_t* grade : grades)
+    while (!WindowShouldClose())
     {
-        SendMessageW(g_gradeCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(grade));
-    }
-    SendMessageW(g_gradeCombo, CB_SETCURSEL, 0, 0);
+        updateTextBox(student, 40);
+        updateTextBox(course, 42);
+        updateTextBox(credits, 2);
 
-    ListView_SetExtendedListViewStyle(g_courseList, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
-    addListColumn(0, L"Course", 240);
-    addListColumn(1, L"Credits", 70);
-    addListColumn(2, L"Grade", 70);
-    addListColumn(3, L"Grade Points", 110);
+        BeginDrawing();
+        ClearBackground(Ink);
+        DrawRectangleGradientV(0, 0, WindowWidth, WindowHeight, Ink, {24, 42, 47, 255});
 
-    g_originalCourseInputProc = reinterpret_cast<WNDPROC>(
-        SetWindowLongPtrW(g_courseInput, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(courseInputProc)));
+        DrawText("CGPA Calculator", 40, 34, 42, Text);
+        DrawText("Track courses, credits, and grades in a calmer workspace.", 42, 86, 18, Muted);
 
-    setFonts();
-    updateSummary();
-}
+        drawTextBox(student, "Student name", "Student");
+        drawTextBox(course, "Course", "Course name");
+        drawTextBox(credits, "Credits", "3");
+        drawGradeSelector(selectedGrade);
 
-LRESULT CALLBACK windowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
-{
-    switch (message)
-    {
-    case WM_CREATE:
-        createControls(window);
-        layoutControls(window);
-        return 0;
+        const bool addPressed = button({40, 274, 132, 46}, "Add Course", Mint, {93, 238, 184, 255});
+        const bool clearPressed = button({188, 274, 96, 46}, "Clear", PanelSoft, {42, 55, 79, 255});
 
-    case WM_SIZE:
-        layoutControls(window);
-        return 0;
-
-    case WM_COMMAND:
-        if (LOWORD(wParam) == AddCourseButtonId && HIWORD(wParam) == BN_CLICKED)
+        if (addPressed || (course.focused && IsKeyPressed(KEY_ENTER)) || (credits.focused && IsKeyPressed(KEY_ENTER)))
         {
-            addCourseFromInput();
-            return 0;
+            const std::string courseName = trim(course.text);
+            const int courseCredits = parseCredits(credits.text);
+            if (courseName.empty())
+            {
+                message = "Enter a course name.";
+            }
+            else if (courseCredits == 0)
+            {
+                message = "Credits must be a whole number from 1 to 30.";
+            }
+            else
+            {
+                const std::wstring grade = widen(Grades[selectedGrade]);
+                courses.push_back({widen(courseName), courseCredits, grade, cgpa::gradePointFor(grade)});
+                course.text.clear();
+                credits.text.clear();
+                course.focused = true;
+                credits.focused = false;
+                message.clear();
+            }
         }
-        if (LOWORD(wParam) == ClearButtonId && HIWORD(wParam) == BN_CLICKED)
+
+        if (clearPressed)
         {
-            clearCourses();
-            return 0;
+            courses.clear();
+            course.text.clear();
+            credits.text.clear();
+            message.clear();
         }
-        if (LOWORD(wParam) == StudentInputId && HIWORD(wParam) == EN_CHANGE)
+
+        const cgpa::Summary summary = cgpa::summarize(courses);
+
+        if (!message.empty())
         {
-            updateSummary();
-            return 0;
+            DrawText(message.c_str(), 316, 288, 16, Coral);
         }
-        break;
 
-    case WM_DESTROY:
-        PostQuitMessage(0);
-        return 0;
+        drawCourseTable(courses);
+        drawSummary(summary, trim(student.text));
+        EndDrawing();
     }
 
-    return DefWindowProcW(window, message, wParam, lParam);
-}
-}
-
-int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int commandShow)
-{
-    INITCOMMONCONTROLSEX commonControls{};
-    commonControls.dwSize = sizeof(commonControls);
-    commonControls.dwICC = ICC_LISTVIEW_CLASSES | ICC_STANDARD_CLASSES;
-    InitCommonControlsEx(&commonControls);
-
-    const wchar_t className[] = L"CGPACalculatorWindow";
-
-    WNDCLASSW windowClass{};
-    windowClass.lpfnWndProc = windowProc;
-    windowClass.hInstance = instance;
-    windowClass.lpszClassName = className;
-    windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    windowClass.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
-
-    if (!RegisterClassW(&windowClass))
-    {
-        MessageBoxW(nullptr, L"Could not register the application window.", L"CGPA Calculator", MB_ICONERROR);
-        return 1;
-    }
-
-    HWND window = CreateWindowExW(
-        0,
-        className,
-        L"CGPA Calculator",
-        WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT,
-        CW_USEDEFAULT,
-        840,
-        560,
-        nullptr,
-        nullptr,
-        instance,
-        nullptr);
-
-    if (!window)
-    {
-        MessageBoxW(nullptr, L"Could not create the application window.", L"CGPA Calculator", MB_ICONERROR);
-        return 1;
-    }
-
-    ShowWindow(window, commandShow);
-    UpdateWindow(window);
-
-    MSG message{};
-    while (GetMessageW(&message, nullptr, 0, 0) > 0)
-    {
-        TranslateMessage(&message);
-        DispatchMessageW(&message);
-    }
-
-    return static_cast<int>(message.wParam);
+    CloseWindow();
+    return 0;
 }

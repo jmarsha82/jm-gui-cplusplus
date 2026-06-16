@@ -52,6 +52,16 @@ target_link_libraries(SnakeGame PRIVATE
 
 add_custom_target(SnakeQtGame DEPENDS SnakeGame)
 
+add_executable(BreakBricksGame
+    src/break_bricks_game.cpp
+)
+
+target_compile_features(BreakBricksGame PRIVATE cxx_std_17)
+
+target_link_libraries(BreakBricksGame PRIVATE
+    raylib
+)
+
 add_executable(CgpaCoreTests
     tests/cgpa_core_tests.cpp
 )

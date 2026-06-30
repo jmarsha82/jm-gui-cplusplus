@@ -211,10 +211,16 @@ private:
     {
         m_score = 0;
         m_lives = 3;
-        m_ballSpeed = BaseBallSpeed;
+        m_level = 1;
+        startLevel();
+    }
+
+    void startLevel()
+    {
+        m_ballSpeed = BaseBallSpeed + static_cast<float>(m_level - 1) * 28.0f;
         m_paddleWidth = PaddleBaseWidth;
         m_multiplierTimer = 0.0f;
-        m_lastEffect = "Break colorful bricks";
+        m_lastEffect = TextFormat("Level %d", m_level);
         m_waiting = false;
         m_gameOver = false;
         m_won = false;
@@ -224,6 +230,22 @@ private:
         buildBricks();
         m_balls.clear();
         spawnBall({m_paddle.x + (m_paddle.width / 2.0f), m_paddle.y - 24.0f}, {-0.35f, -1.0f}, Mint);
+    }
+
+    void advanceLevel()
+    {
+        ++m_level;
+        startLevel();
+    }
+
+    bool includeBrick(int row, int column) const
+    {
+        if (m_level == 1) return true;
+        if (m_level == 2) return ((row + column) % 2 == 0) || row == 0 || row == BrickRows - 1;
+        if (m_level == 3) return column == row || column == BrickColumns - row - 1 || row < 2 || row > BrickRows - 3;
+        if (m_level == 4) return column % 3 != 1 || row % 2 == 0;
+        if (m_level == 5) return row == 0 || row == BrickRows - 1 || column == 0 || column == BrickColumns - 1 || (row + column) % 3 == 0;
+        return true;
     }
 
     void buildBricks()
@@ -236,8 +258,13 @@ private:
         {
             for (int column = 0; column < BrickColumns; ++column)
             {
+                if (!includeBrick(row, column))
+                {
+                    continue;
+                }
+
                 BrickKind kind = BrickKind::Normal;
-                const int pattern = (row * 7 + column * 3) % 17;
+                const int pattern = (row * 7 + column * 3 + m_level) % 17;
                 if (pattern == 0)
                 {
                     kind = BrickKind::ExtraBall;
@@ -341,9 +368,12 @@ private:
             spawnBall({m_paddle.x + (m_paddle.width / 2.0f), m_paddle.y - 24.0f}, {0.35f, -1.0f}, Mint);
         }
 
-        m_won = std::none_of(m_bricks.begin(), m_bricks.end(), [](const Brick& brick) {
+        if (std::none_of(m_bricks.begin(), m_bricks.end(), [](const Brick& brick) {
             return brick.alive;
-        });
+        }))
+        {
+            advanceLevel();
+        }
     }
 
     void handleWallCollision(Ball& ball)
@@ -437,7 +467,7 @@ private:
 
     void drawHeader() const
     {
-        DrawText("Break Bricks", 56, 30, 42, Text);
+        DrawText(TextFormat("Break Bricks - Level %d", m_level), 56, 30, 42, Text);
         DrawText("One player. Color-coded power bricks. Keep every ball alive.", 58, 74, 18, Muted);
     }
 
@@ -506,20 +536,23 @@ private:
         DrawRectangleRounded(panel, 0.07f, 14, Panel);
         DrawRectangleRoundedLinesEx(panel, 0.07f, 14, 1.0f, Stroke);
 
-        DrawText("Score", 896, 128, 16, Muted);
-        DrawText(std::to_string(m_score).c_str(), 896, 150, 34, Text);
+        DrawText("Level", 896, 118, 16, Muted);
+        DrawText(std::to_string(m_level).c_str(), 896, 140, 30, Mint);
 
-        DrawText("Lives", 896, 216, 16, Muted);
-        DrawText(std::to_string(m_lives).c_str(), 896, 238, 30, Citrus);
+        DrawText("Score", 896, 188, 16, Muted);
+        DrawText(std::to_string(m_score).c_str(), 896, 210, 34, Text);
 
-        DrawText("Balls", 982, 216, 16, Muted);
-        DrawText(std::to_string(m_balls.size()).c_str(), 982, 238, 30, Violet);
+        DrawText("Lives", 896, 276, 16, Muted);
+        DrawText(std::to_string(m_lives).c_str(), 896, 298, 30, Citrus);
 
-        DrawText("Speed", 896, 304, 16, Muted);
-        DrawText(TextFormat("%.0f", m_ballSpeed), 896, 326, 26, Cyan);
+        DrawText("Balls", 982, 276, 16, Muted);
+        DrawText(std::to_string(m_balls.size()).c_str(), 982, 298, 30, Violet);
 
-        DrawText("Last effect", 896, 388, 16, Muted);
-        DrawText(m_lastEffect.c_str(), 896, 412, 17, Text);
+        DrawText("Speed", 896, 356, 16, Muted);
+        DrawText(TextFormat("%.0f", m_ballSpeed), 896, 378, 26, Cyan);
+
+        DrawText("Last effect", 896, 430, 16, Muted);
+        DrawText(m_lastEffect.c_str(), 896, 454, 17, Text);
 
         DrawText("Attributes", 896, 476, 16, Muted);
         drawLegendRow(896, 506, BrickKind::SpeedUp);
@@ -568,6 +601,7 @@ private:
     float m_multiplierTimer = 0.0f;
     int m_score = 0;
     int m_lives = 3;
+    int m_level = 1;
     float m_lastMouseX = 0.0f;
     std::string m_lastEffect;
     bool m_waiting = false;

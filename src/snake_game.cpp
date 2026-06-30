@@ -13,7 +13,7 @@ constexpr int BoardWidth = BoardColumns * CellSize;
 constexpr int BoardHeight = BoardRows * CellSize;
 constexpr int PanelWidth = 230;
 constexpr int WindowWidth = BoardWidth + PanelWidth;
-constexpr float TickSeconds = 0.11f;
+constexpr float TickBaseSeconds = 0.12f;
 
 constexpr Color Ink{18, 24, 38, 255};
 constexpr Color DeepInk{9, 14, 24, 255};
@@ -108,9 +108,9 @@ public:
         }
 
         m_elapsed += GetFrameTime();
-        while (m_elapsed >= TickSeconds)
+        while (m_elapsed >= tickSeconds())
         {
-            m_elapsed -= TickSeconds;
+            m_elapsed -= tickSeconds();
             step();
         }
     }
@@ -142,6 +142,8 @@ private:
         m_direction = Direction::Right;
         m_nextDirection = Direction::Right;
         m_score = 0;
+        m_level = 1;
+        m_obstacles = obstaclesForLevel(m_level);
         m_elapsed = 0.0f;
         m_gameOver = false;
         m_paused = false;
@@ -179,7 +181,7 @@ private:
             m_paused = !m_paused;
         }
 
-        if (IsKeyPressed(KEY_R))
+        if (IsKeyPressed(KEY_R) || (m_gameOver && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)))
         {
             restart();
         }
@@ -195,7 +197,7 @@ private:
 
         if (nextHead.x < 0 || nextHead.x >= BoardColumns ||
             nextHead.y < 0 || nextHead.y >= BoardRows ||
-            hitsSelf(nextHead, eatsFood))
+            hitsSelf(nextHead, eatsFood) || hitsObstacle(nextHead))
         {
             m_gameOver = true;
             return;
@@ -205,6 +207,7 @@ private:
         if (eatsFood)
         {
             m_score += 10;
+            updateLevel();
             placeFood();
         }
         else
@@ -224,7 +227,49 @@ private:
         do
         {
             m_food = {GetRandomValue(0, BoardColumns - 1), GetRandomValue(0, BoardRows - 1)};
-        } while (std::find(m_snake.begin(), m_snake.end(), m_food) != m_snake.end());
+        } while (std::find(m_snake.begin(), m_snake.end(), m_food) != m_snake.end() || hitsObstacle(m_food));
+    }
+
+
+    float tickSeconds() const
+    {
+        return std::max(0.064f, TickBaseSeconds - static_cast<float>(m_level - 1) * 0.012f);
+    }
+
+    void updateLevel()
+    {
+        const int nextLevel = std::min(5, (m_score / 50) + 1);
+        if (nextLevel != m_level)
+        {
+            m_level = nextLevel;
+            m_obstacles = obstaclesForLevel(m_level);
+        }
+    }
+
+    bool hitsObstacle(const Cell& cell) const
+    {
+        return std::find(m_obstacles.begin(), m_obstacles.end(), cell) != m_obstacles.end();
+    }
+
+    std::vector<Cell> obstaclesForLevel(int level) const
+    {
+        if (level <= 1)
+        {
+            return {};
+        }
+        if (level == 2)
+        {
+            return {{8, 5}, {9, 5}, {10, 5}, {14, 12}, {15, 12}, {16, 12}};
+        }
+        if (level == 3)
+        {
+            return {{8, 4}, {9, 13}, {10, 4}, {11, 13}, {12, 4}, {13, 13}, {14, 4}, {15, 13}};
+        }
+        if (level == 4)
+        {
+            return {{5, 5}, {5, 6}, {5, 7}, {5, 8}, {5, 9}, {5, 10}, {5, 11}, {5, 12}, {18, 5}, {18, 6}, {18, 7}, {18, 8}, {18, 9}, {18, 10}, {18, 11}, {18, 12}};
+        }
+        return {{8, 6}, {9, 6}, {10, 6}, {11, 6}, {12, 6}, {13, 6}, {14, 6}, {10, 11}, {11, 11}, {12, 11}, {13, 11}, {14, 11}, {15, 11}, {16, 11}, {6, 14}, {17, 3}};
     }
 
     void drawBackground() const
@@ -246,6 +291,17 @@ private:
         }
 
         DrawRectangleRounded({12, 12, BoardWidth - 24.0f, BoardHeight - 24.0f}, 0.08f, 12, {255, 255, 255, 9});
+
+        for (const Cell& obstacle : m_obstacles)
+        {
+            Rectangle block = cellRect(obstacle);
+            block.x += 2;
+            block.y += 2;
+            block.width -= 4;
+            block.height -= 4;
+            DrawRectangleRounded(block, 0.22f, 8, Coral);
+            DrawRectangleRoundedLinesEx(block, 0.22f, 8, 1.0f, {255, 255, 255, 90});
+        }
     }
 
     void drawFood() const
@@ -308,12 +364,13 @@ private:
         DrawText("Snake", BoardWidth + 26, 34, 32, TextColor);
         DrawText("Neon orchard chase", BoardWidth + 26, 86, 16, MutedText);
 
-        drawStat("Score", std::to_string(m_score), 150, Mint);
-        drawStat("Length", std::to_string(m_snake.size()), 235, Citrus);
+        drawStat("Score", std::to_string(m_score), 138, Mint);
+        drawStat("Level", std::to_string(m_level), 218, Coral);
+        drawStat("Length", std::to_string(m_snake.size()), 298, Citrus);
 
-        DrawText("Arrow keys or WASD", BoardWidth + 26, 326, 16, MutedText);
-        DrawText("Space to pause", BoardWidth + 26, 350, 16, MutedText);
-        DrawText("R to restart", BoardWidth + 26, 374, 16, MutedText);
+        DrawText("Arrow keys or WASD", BoardWidth + 26, 382, 16, MutedText);
+        DrawText("Space to pause", BoardWidth + 26, 406, 16, MutedText);
+        DrawText("R/click to restart", BoardWidth + 26, 430, 16, MutedText);
     }
 
     void drawStat(const char* label, const std::string& value, int top, Color accent) const
@@ -341,16 +398,18 @@ private:
         const int titleWidth = MeasureText(title, titleSize);
         DrawText(title, (BoardWidth - titleWidth) / 2, 166, titleSize, m_gameOver ? Coral : Citrus);
 
-        const char* prompt = "Press R to restart";
+        const char* prompt = m_gameOver ? "Press R or click to restart" : "Press R to restart";
         const int promptWidth = MeasureText(prompt, 18);
         DrawText(prompt, (BoardWidth - promptWidth) / 2, 232, 18, TextColor);
     }
 
     std::vector<Cell> m_snake;
+    std::vector<Cell> m_obstacles;
     Cell m_food;
     Direction m_direction = Direction::Right;
     Direction m_nextDirection = Direction::Right;
     int m_score = 0;
+    int m_level = 1;
     float m_elapsed = 0.0f;
     bool m_gameOver = false;
     bool m_paused = false;

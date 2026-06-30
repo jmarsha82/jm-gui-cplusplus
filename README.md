@@ -82,8 +82,38 @@ Move the paddle with the mouse or `A` / `D` and the arrow keys. Break every bric
 
 ## Tests
 
-The CGPA calculation logic has a small test executable registered with CTest:
+Unit tests live in one unified location: `tests/`. The current CTest target covers the shared CGPA calculation core in `src/cgpa/cgpa_core.hpp`, including grade-point mapping, overall grade boundaries, GPA summary math, empty input, and negative-credit handling.
+
+Build and run the unit tests:
 
 ```powershell
-ctest --test-dir build -C Release
+cmake -S . -B build
+cmake --build build --config Release --target CgpaCoreTests
+ctest --test-dir build -C Release --output-on-failure
+```
+
+The CI coverage job uses `gcovr` on Ubuntu with GCC coverage flags and enforces at least 90% line coverage for the unit-tested `src/cgpa` core:
+
+```bash
+cmake -S . -B build-coverage -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS="--coverage -O0 -g" -DCMAKE_EXE_LINKER_FLAGS="--coverage"
+cmake --build build-coverage --target CgpaCoreTests
+ctest --test-dir build-coverage --output-on-failure
+gcovr --root . --filter "src/cgpa" --exclude "tests" --txt --fail-under-line 90
+```
+
+## CI Pipeline
+
+The GitHub Actions pipeline is defined in `.github/workflows/ci.yml` and runs on pushes to `main` / `master`, pull requests, and manual dispatches.
+
+- `Unit Tests`: configures CMake, builds the `CgpaCoreTests` executable, and runs the registered CTest suite.
+- `Unit Test Coverage`: runs the same unit target with GCC coverage instrumentation and fails if line coverage for `src/cgpa` drops below 90%.
+- `Code Scanning / Quality`: runs GitHub CodeQL with the `security-and-quality` query suite so maintainability and correctness findings are reported in GitHub code scanning.
+- `Code Scanning / Security`: runs GitHub Dependency Review on pull requests and GitHub CodeQL with the `security-extended` query suite so security-oriented findings stay separate from quality findings.
+
+CodeQL code scanning and Dependency Review are available at no cost for public repositories. Private repositories may require GitHub Advanced Security to publish code scanning and dependency alerts, depending on the account and repository settings.
+
+The main test command used by the pipeline is:
+
+```powershell
+ctest --test-dir build -C Release --output-on-failure
 ```

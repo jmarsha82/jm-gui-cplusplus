@@ -87,15 +87,15 @@ Unit tests live in one unified location: `tests/`. The current CTest target cove
 Build and run the unit tests:
 
 ```powershell
-cmake -S . -B build
+cmake -S . -B build -DJM_BUILD_APPS=OFF
 cmake --build build --config Release --target CgpaCoreTests
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-The CI coverage job uses `gcovr` on Ubuntu with GCC coverage flags and enforces at least 90% line coverage for the unit-tested `src/cgpa` core:
+The `JM_BUILD_APPS=OFF` option skips the Raylib app targets and is intended for unit-test-only builds. The CI coverage job uses `gcovr` on Ubuntu with GCC coverage flags and enforces at least 90% line coverage for the unit-tested `src/cgpa` core:
 
 ```bash
-cmake -S . -B build-coverage -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS="--coverage -O0 -g" -DCMAKE_EXE_LINKER_FLAGS="--coverage"
+cmake -S . -B build-coverage -DCMAKE_BUILD_TYPE=Debug -DJM_BUILD_APPS=OFF -DCMAKE_CXX_FLAGS="--coverage -O0 -g" -DCMAKE_EXE_LINKER_FLAGS="--coverage"
 cmake --build build-coverage --target CgpaCoreTests
 ctest --test-dir build-coverage --output-on-failure
 gcovr --root . --filter "src/cgpa" --exclude "tests" --txt --fail-under-line 90
